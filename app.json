@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "AP Store",
+    "slug": "ap-store-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "owner": "apirak272543art",
+    "runtimeVersion": { "policy": "appVersion" },
+    "updates": { "url": "https://u.expo.dev/b02437ec-2503-4ad6-ae97-a91890953fa5", "checkAutomatically": "ON_LOAD", "fallbackToCacheTimeout": 0 },
+    "android": {
+      "package": "com.apservice.store",
+      "permissions": ["POST_NOTIFICATIONS"],
+      "adaptiveIcon": { "foregroundImage": "./assets/adaptive-icon.png", "backgroundColor": "#0B6E5B" }
+    },
+    "plugins": [["expo-notifications", { "defaultChannel": "store-ap_urgent", "sounds": ["./assets/sounds/ap_chime.wav", "./assets/sounds/ap_urgent.wav", "./assets/sounds/ap_priority.wav"] }]],
+    "extra": {
+      "supabaseUrl": "https://abtsctwfkgzciseppach.supabase.co",
+      "supabasePublishableKey": "sb_publishable_TyJWnKkbS8vKcQKKAzoqSg_BOguwKRv",
+      "eas": { "projectId": "b02437ec-2503-4ad6-ae97-a91890953fa5" }
+    }
+  }
+}
