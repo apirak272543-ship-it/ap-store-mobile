@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, AppState, BackHandler, Modal, Pressable, SafeAreaView, StatusBar, StyleSheet, Switch, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
 
-import { countOpenStoreOrders, registerPushToken, Session } from "./src/api";
+import { clearSession, countOpenStoreOrders, disablePushToken, registerPushToken, Session } from "./src/api";
 import { DEFAULT_NOTIFICATION_PREFERENCES, loadNotificationPreferences, NotificationPreferences, NotificationTone, saveNotificationPreferences } from "./src/notification-settings";
-import { notificationToneLabel, notifyNewOrder, playStoreNotificationPreview, setupStoreNotifications } from "./src/notifications";
+import { notificationToneLabel, notifyNewOrder, notifyStoreActionConfirmed, playStoreNotificationPreview, setupStoreNotifications } from "./src/notifications";
 import { applyOtaUpdate, downloadOtaUpdate, OtaResult } from "./src/ota";
 
 const CONSOLE_URL = "https://apirak272543-ship-it.github.io/Apservice-/store.html";
@@ -38,11 +38,48 @@ const sessionBridge = `
   })();
 `;
 
+const storeConsoleSync = `
+  (async function () {
+    try {
+      if (!window.__apStoreInteractionBridge && window.ReactNativeWebView) {
+        window.__apStoreInteractionBridge = true;
+        document.addEventListener("click", function (event) {
+          var button = event.target && event.target.closest ? event.target.closest("button") : null;
+          var label = String(button && button.innerText || "").trim();
+          if (button && /ยืนยัน|บันทึก|อนุมัติ|เปลี่ยนสถานะ|ส่งคำขอ|ปิดร้าน/.test(label)) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({ type: "ap-service-store-confirm-action" }));
+          }
+        }, true);
+      }
+      if (typeof Cloud !== "undefined" && typeof Cloud.pullOrders === "function") {
+        await Cloud.pullOrders();
+        if (typeof render === "function") render();
+      }
+    } catch (_) {}
+    true;
+  })();
+`;
+
+const storeLogoutBridge = `
+  (function () {
+    try {
+      window.localStorage.removeItem(${JSON.stringify(SESSION_STORAGE_KEY)});
+      window.sessionStorage.removeItem(${JSON.stringify(SESSION_STORAGE_KEY)});
+      window.localStorage.removeItem("apcx_store_session");
+      if (typeof Cloud !== "undefined" && Cloud && typeof Cloud.clearSession === "function") Cloud.clearSession();
+      if (typeof State !== "undefined" && State) State.session = null;
+      if (typeof render === "function") render();
+    } catch (_) {}
+    true;
+  })();
+`;
+
 export default function App() {
   const webRef = useRef<WebView>(null);
   const [canGoBack, setCanGoBack] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [secondaryMenuOpen, setSecondaryMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [preferences, setPreferences] = useState<NotificationPreferences>(DEFAULT_NOTIFICATION_PREFERENCES);
   const [pushToken, setPushToken] = useState<string | null>(null);
@@ -100,10 +137,22 @@ export default function App() {
     };
     openOrderCountRef.current = null;
     void pollOpenOrders();
-    const interval = setInterval(() => { void pollOpenOrders(); }, 5000);
+    const interval = setInterval(() => { void pollOpenOrders(); }, 30000);
     const appStateSubscription = AppState.addEventListener("change", (state) => {
       if (state === "active") { openOrderCountRef.current = null; void pollOpenOrders(); }
     });
+    return () => { disposed = true; clearInterval(interval); appStateSubscription.remove(); };
+  }, [session]);
+
+  useEffect(() => {
+    if (!session) return;
+    let disposed = false;
+    const syncStoreConsole = () => {
+      if (!disposed && AppState.currentState === "active") webRef.current?.injectJavaScript(storeConsoleSync);
+    };
+    syncStoreConsole();
+    const interval = setInterval(syncStoreConsole, 30000);
+    const appStateSubscription = AppState.addEventListener("change", (state) => { if (state === "active") syncStoreConsole(); });
     return () => { disposed = true; clearInterval(interval); appStateSubscription.remove(); };
   }, [session]);
 
@@ -137,12 +186,45 @@ export default function App() {
     Alert.alert(result.state === "up-to-date" ? "อัปเดตแอป" : "สถานะ OTA", result.message);
   };
 
+  const refreshConsole = () => {
+    setSecondaryMenuOpen(false);
+    webRef.current?.reload();
+  };
+
+  const openNotificationSettings = () => {
+    setSecondaryMenuOpen(false);
+    setSettingsOpen(true);
+  };
+
+  const handleLogout = () => {
+    Alert.alert("ออกจากระบบร้านค้า", "ข้อมูลการเข้าสู่ระบบจะถูกลบออกจากเครื่องนี้ และหยุดการแจ้งเตือนของบัญชีเดิม", [
+      { text: "ยกเลิก", style: "cancel" },
+      {
+        text: "ออกจากระบบ",
+        style: "destructive",
+        onPress: () => {
+          const activeSession = session;
+          setSecondaryMenuOpen(false);
+          setSettingsOpen(false);
+          openOrderCountRef.current = null;
+          if (activeSession && pushToken) void disablePushToken(activeSession, pushToken).catch(() => undefined);
+          void clearSession();
+          setSession(null);
+          webRef.current?.injectJavaScript(storeLogoutBridge);
+        },
+      },
+    ]);
+  };
+
+  const pushStatus = pushToken ? "อุปกรณ์นี้พร้อมรับการแจ้งเตือน" : pushIssueRef.current ? "ต้องตรวจสอบสิทธิ์แจ้งเตือน" : "กำลังตรวจสอบการแจ้งเตือน";
+
   const handleMessage = (event: { nativeEvent: { data: string } }) => {
     try {
       const payload = JSON.parse(event.nativeEvent.data);
       if (payload?.type === "ap-service-session" && payload.session?.access_token && payload.session?.user?.id) {
         setSession(payload.session as Session);
       }
+      if (payload?.type === "ap-service-store-confirm-action") void notifyStoreActionConfirmed(preferencesRef.current);
     } catch {
       // ข้อความจากหน้าเว็บที่ไม่ใช่ bridge จะไม่กระทบคอนโซล
     }
@@ -157,8 +239,8 @@ export default function App() {
     <View style={styles.nativeHeader}>
       <View><Text style={styles.brand}>AP Store</Text><Text style={styles.caption}>Store Console · ข้อมูลจริงจาก AP Service</Text></View>
       <View style={styles.headerActions}>
-        <Pressable accessibilityLabel="รีเฟรชข้อมูลร้านค้า" style={styles.iconButton} onPress={() => webRef.current?.reload()}><Text style={styles.iconText}>↻</Text></Pressable>
-        <Pressable accessibilityLabel="ตั้งค่าการแจ้งเตือน" style={styles.settingsButton} onPress={() => setSettingsOpen(true)}><Text style={styles.settingsButtonText}>เสียงแจ้งเตือน</Text></Pressable>
+        <Pressable accessibilityLabel="รีเฟรชข้อมูลร้านค้า" style={styles.iconButton} onPress={refreshConsole}><Text style={styles.iconText}>↻</Text></Pressable>
+        <Pressable accessibilityLabel="เมนูเพิ่มเติม" style={styles.iconButton} onPress={() => setSecondaryMenuOpen(true)}><Text style={styles.moreIcon}>•••</Text></Pressable>
       </View>
     </View>
     <View style={styles.webShell}>
@@ -183,9 +265,11 @@ export default function App() {
       />
       {isLoading ? <View style={styles.loadingOverlay}><ActivityIndicator color="#0B6E5B" /><Text style={styles.loadingText}>กำลังเปิด Store Console…</Text></View> : null}
     </View>
+    <Modal visible={secondaryMenuOpen} animationType="fade" transparent onRequestClose={() => setSecondaryMenuOpen(false)}><View style={styles.modalBackdrop}><Pressable style={StyleSheet.absoluteFillObject} onPress={() => setSecondaryMenuOpen(false)} /><View style={styles.menuSheet}><View style={styles.sheetHeader}><View><Text style={styles.sheetTitle}>เมนูเพิ่มเติม</Text><Text style={styles.sheetSubtitle}>เครื่องมือของ AP Store</Text></View><Pressable style={styles.closeButton} onPress={() => setSecondaryMenuOpen(false)}><Text style={styles.closeText}>ปิด</Text></Pressable></View><Pressable style={styles.menuItem} onPress={refreshConsole}><View style={styles.menuCopy}><Text style={styles.menuTitle}>รีเฟรชข้อมูล</Text><Text style={styles.menuBody}>ดึงสถานะออร์เดอร์ล่าสุดจาก Store Console</Text></View><Text style={styles.menuArrow}>›</Text></Pressable><Pressable style={styles.menuItem} onPress={openNotificationSettings}><View style={styles.menuCopy}><Text style={styles.menuTitle}>การแจ้งเตือนและเสียง</Text><Text style={styles.menuBody}>{pushStatus}</Text></View><Text style={styles.menuArrow}>›</Text></Pressable><Pressable style={styles.menuItem} disabled={otaLoading} onPress={() => { setSecondaryMenuOpen(false); void checkOta(); }}><View style={styles.menuCopy}><Text style={styles.menuTitle}>ตรวจสอบการอัปเดต</Text><Text style={styles.menuBody}>{otaLoading ? "กำลังตรวจสอบ…" : otaResult?.message || "ค้นหาอัปเดตภายในแอป"}</Text></View><Text style={styles.menuArrow}>›</Text></Pressable><Pressable style={[styles.menuItem, styles.menuItemDanger]} onPress={handleLogout}><View style={styles.menuCopy}><Text style={styles.menuDangerTitle}>ออกจากระบบ</Text><Text style={styles.menuBody}>ล้างบัญชีออกจากอุปกรณ์นี้</Text></View><Text style={styles.menuDangerTitle}>ออก</Text></Pressable></View></View></Modal>
     <Modal visible={settingsOpen} animationType="slide" transparent onRequestClose={() => setSettingsOpen(false)}>
       <View style={styles.modalBackdrop}><View style={styles.sheet}>
         <View style={styles.sheetHeader}><View><Text style={styles.sheetTitle}>การแจ้งเตือน AP Store</Text><Text style={styles.sheetSubtitle}>คอนโซลยังใช้ข้อมูลและสิทธิ์เดียวกับเว็บไซต์</Text></View><Pressable style={styles.closeButton} onPress={() => setSettingsOpen(false)}><Text style={styles.closeText}>ปิด</Text></Pressable></View>
+        <View style={styles.statusCard}><Text style={styles.settingTitle}>สถานะการแจ้งเตือน</Text><Text style={styles.settingBody}>{pushStatus}</Text></View>
         <View style={styles.settingRow}><View style={styles.settingCopy}><Text style={styles.settingTitle}>แจ้งเตือนออร์เดอร์และข้อความใหม่</Text><Text style={styles.settingBody}>เมื่อแอปเปิดอยู่ จะร้องทันทีเมื่อจำนวนออร์เดอร์รอดำเนินการใน Store Console เพิ่มขึ้น</Text></View><Switch value={preferences.enabled} trackColor={{ true: "#0B6E5B" }} onValueChange={(enabled) => { void updatePreferences({ ...preferences, enabled }); }} /></View>
         <Text style={styles.settingTitle}>เลือกเสียงแจ้งเตือน</Text>
         <View style={styles.toneList}>{TONES.map((tone) => <Pressable key={tone} style={[styles.tone, preferences.tone === tone && styles.toneActive]} onPress={() => { void updatePreferences({ ...preferences, tone }); }}><Text style={[styles.toneText, preferences.tone === tone && styles.toneTextActive]}>{notificationToneLabel(tone)}</Text></Pressable>)}</View>
@@ -204,8 +288,7 @@ const styles = StyleSheet.create({
   headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   iconButton: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: "#E8F6F0" },
   iconText: { color: "#0B6E5B", fontSize: 20, fontWeight: "800" },
-  settingsButton: { backgroundColor: "#0B6E5B", paddingHorizontal: 10, paddingVertical: 9, borderRadius: 11 },
-  settingsButtonText: { color: "#FFFFFF", fontWeight: "800", fontSize: 11 },
+  moreIcon: { color: "#0B6E5B", fontSize: 15, fontWeight: "900", letterSpacing: 1, marginTop: -6 },
   webShell: { flex: 1, backgroundColor: "#F7FAF8" },
   loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center", gap: 10 },
   loadingText: { color: "#60766E", fontSize: 13 },
@@ -216,11 +299,20 @@ const styles = StyleSheet.create({
   primaryText: { color: "#FFFFFF", fontWeight: "900", fontSize: 13 },
   modalBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(8, 22, 18, .35)" },
   sheet: { backgroundColor: "#FFFFFF", borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 32 },
+  menuSheet: { backgroundColor: "#FFFFFF", borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 32 },
   sheetHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 18 },
   sheetTitle: { color: "#12352D", fontSize: 20, fontWeight: "900" },
   sheetSubtitle: { color: "#6B7C76", fontSize: 11, marginTop: 3 },
   closeButton: { backgroundColor: "#E8F6F0", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
   closeText: { color: "#0B6E5B", fontWeight: "800", fontSize: 12 },
+  menuItem: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 14, borderTopWidth: 1, borderTopColor: "#EAF0ED" },
+  menuItemDanger: { marginTop: 6, borderBottomWidth: 1, borderBottomColor: "#F2DBDB" },
+  menuCopy: { flex: 1 },
+  menuTitle: { color: "#183C32", fontSize: 14, fontWeight: "900" },
+  menuDangerTitle: { color: "#B33737", fontSize: 13, fontWeight: "900" },
+  menuBody: { color: "#6B7C76", fontSize: 11, lineHeight: 17, marginTop: 3 },
+  menuArrow: { color: "#0B6E5B", fontSize: 25, fontWeight: "400" },
+  statusCard: { backgroundColor: "#F3F8F5", borderRadius: 14, padding: 13, marginBottom: 14 },
   settingRow: { flexDirection: "row", gap: 14, alignItems: "center", paddingVertical: 14, borderTopWidth: 1, borderTopColor: "#EAF0ED", borderBottomWidth: 1, borderBottomColor: "#EAF0ED", marginBottom: 16 },
   settingCopy: { flex: 1 }, settingTitle: { color: "#183C32", fontSize: 14, fontWeight: "900" }, settingBody: { color: "#6B7C76", fontSize: 11, lineHeight: 17, marginTop: 4 },
   toneList: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 9 },

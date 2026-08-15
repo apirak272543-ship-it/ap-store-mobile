@@ -24,7 +24,7 @@ async function createStoreChannels() {
     name: `ออร์เดอร์ร้านค้า · ${toneLabels[tone]}`,
     description: "ใช้สำหรับออร์เดอร์และข้อความใหม่ของร้านค้า",
     importance: Notifications.AndroidImportance.MAX,
-    vibrationPattern: tone === "ap_priority" ? [0, 350, 160, 350, 160, 350] : [0, 250, 180, 250],
+    vibrationPattern: tone === "ap_priority" ? [0, 700, 160, 700, 160, 700, 160, 700] : [0, 250, 180, 250],
     sound: `${tone}.wav`,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
   })));
@@ -46,8 +46,16 @@ export async function setupStoreNotifications() {
 export async function notifyNewOrder(count: number, preferences: NotificationPreferences) {
   if (!preferences.enabled) return;
   await Notifications.scheduleNotificationAsync({
-    content: { title: "มีออร์เดอร์ใหม่", body: `มี ${count} ออร์เดอร์รอร้านยืนยัน`, sound: `${preferences.tone}.wav`, data: { screen: "orders", kind: "order" } },
-    trigger: Platform.OS === "android" ? { channelId: storeChannelId(preferences.tone) } : null,
+    content: { title: "มีออร์เดอร์ใหม่", body: `มี ${count} ออร์เดอร์รอร้านยืนยัน`, sound: "ap_priority.wav", priority: Notifications.AndroidNotificationPriority.MAX, data: { screen: "orders", kind: "order" } },
+    trigger: Platform.OS === "android" ? { channelId: storeChannelId("ap_priority") } : null,
+  });
+}
+
+export async function notifyStoreActionConfirmed(preferences: NotificationPreferences) {
+  if (!preferences.enabled) return;
+  await Notifications.scheduleNotificationAsync({
+    content: { title: "ยืนยันคำสั่งแล้ว", body: "ระบบกำลังดำเนินการ", sound: "ap_chime.wav", data: { kind: "action" } },
+    trigger: Platform.OS === "android" ? { channelId: storeChannelId("ap_chime") } : null,
   });
 }
 
