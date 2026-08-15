@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, BackHandler, Modal, Pressable, SafeAreaView, StatusBar, StyleSheet, Switch, Text, View } from "react-native";
+import { ActivityIndicator, Alert, AppState, BackHandler, Modal, Pressable, SafeAreaView, StatusBar, StyleSheet, Switch, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
 
-import { registerPushToken, Session } from "./src/api";
+import { countOpenStoreOrders, registerPushToken, Session } from "./src/api";
 import { DEFAULT_NOTIFICATION_PREFERENCES, loadNotificationPreferences, NotificationPreferences, NotificationTone, saveNotificationPreferences } from "./src/notification-settings";
-import { notificationToneLabel, playStoreNotificationPreview, setupStoreNotifications } from "./src/notifications";
+import { notificationToneLabel, notifyNewOrder, playStoreNotificationPreview, setupStoreNotifications } from "./src/notifications";
 import { applyOtaUpdate, downloadOtaUpdate, OtaResult } from "./src/ota";
 
 const CONSOLE_URL = "https://apirak272543-ship-it.github.io/Apservice-/store.html";
@@ -48,6 +48,8 @@ export default function App() {
   const [pushToken, setPushToken] = useState<string | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const pushIssueRef = useRef<string | null>(null);
+  const openOrderCountRef = useRef<number | null>(null);
+  const preferencesRef = useRef<NotificationPreferences>(preferences);
   const [otaLoading, setOtaLoading] = useState(false);
   const [otaResult, setOtaResult] = useState<OtaResult | null>(null);
 
@@ -76,6 +78,34 @@ export default function App() {
       if (pushIssueRef.current !== message) { pushIssueRef.current = message; Alert.alert("ยังเชื่อมการแจ้งเตือนไม่สำเร็จ", message); }
     });
   }, [session, pushToken, preferences]);
+
+  useEffect(() => { preferencesRef.current = preferences; }, [preferences]);
+
+  useEffect(() => {
+    if (!session) return;
+    let disposed = false;
+    let polling = false;
+    const pollOpenOrders = async () => {
+      if (disposed || polling || AppState.currentState !== "active") return;
+      polling = true;
+      try {
+        const currentCount = await countOpenStoreOrders(session);
+        if (currentCount === null) return;
+        const previousCount = openOrderCountRef.current;
+        openOrderCountRef.current = currentCount;
+        if (previousCount !== null && currentCount > previousCount) void notifyNewOrder(currentCount, preferencesRef.current);
+      } catch {
+        // การตรวจเสียงเป็นงานเสริม จึงไม่ขัดขวาง Store Console เมื่อเครือข่ายสะดุด
+      } finally { polling = false; }
+    };
+    openOrderCountRef.current = null;
+    void pollOpenOrders();
+    const interval = setInterval(() => { void pollOpenOrders(); }, 5000);
+    const appStateSubscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") { openOrderCountRef.current = null; void pollOpenOrders(); }
+    });
+    return () => { disposed = true; clearInterval(interval); appStateSubscription.remove(); };
+  }, [session]);
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
@@ -156,7 +186,7 @@ export default function App() {
     <Modal visible={settingsOpen} animationType="slide" transparent onRequestClose={() => setSettingsOpen(false)}>
       <View style={styles.modalBackdrop}><View style={styles.sheet}>
         <View style={styles.sheetHeader}><View><Text style={styles.sheetTitle}>การแจ้งเตือน AP Store</Text><Text style={styles.sheetSubtitle}>คอนโซลยังใช้ข้อมูลและสิทธิ์เดียวกับเว็บไซต์</Text></View><Pressable style={styles.closeButton} onPress={() => setSettingsOpen(false)}><Text style={styles.closeText}>ปิด</Text></Pressable></View>
-        <View style={styles.settingRow}><View style={styles.settingCopy}><Text style={styles.settingTitle}>แจ้งเตือนออร์เดอร์และข้อความใหม่</Text><Text style={styles.settingBody}>แจ้งเตือนแม้แอปอยู่เบื้องหลังเมื่อบัญชีร้านค้าเข้าสู่ระบบแล้ว</Text></View><Switch value={preferences.enabled} trackColor={{ true: "#0B6E5B" }} onValueChange={(enabled) => { void updatePreferences({ ...preferences, enabled }); }} /></View>
+        <View style={styles.settingRow}><View style={styles.settingCopy}><Text style={styles.settingTitle}>แจ้งเตือนออร์เดอร์และข้อความใหม่</Text><Text style={styles.settingBody}>เมื่อแอปเปิดอยู่ จะร้องทันทีเมื่อจำนวนออร์เดอร์รอดำเนินการใน Store Console เพิ่มขึ้น</Text></View><Switch value={preferences.enabled} trackColor={{ true: "#0B6E5B" }} onValueChange={(enabled) => { void updatePreferences({ ...preferences, enabled }); }} /></View>
         <Text style={styles.settingTitle}>เลือกเสียงแจ้งเตือน</Text>
         <View style={styles.toneList}>{TONES.map((tone) => <Pressable key={tone} style={[styles.tone, preferences.tone === tone && styles.toneActive]} onPress={() => { void updatePreferences({ ...preferences, tone }); }}><Text style={[styles.toneText, preferences.tone === tone && styles.toneTextActive]}>{notificationToneLabel(tone)}</Text></Pressable>)}</View>
         <Pressable style={styles.secondaryButton} onPress={() => { void playStoreNotificationPreview(preferences); }}><Text style={styles.secondaryText}>ทดสอบเสียงที่เลือก</Text></Pressable>
