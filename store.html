@@ -169,5 +169,6 @@
     /* Do not release transfer orders to the store before Admin payment review. */
     (()=>{const baseFetch=window.fetch.bind(window);window.fetch=(input,init)=>{const raw=String(input||'');if(raw.includes('/rest/v1/delivery_orders?')&&raw.includes('store_id=eq.')){try{const url=new URL(raw);url.searchParams.set('status','not.in.("รอตรวจสอบการชำระเงิน","ต้องแนบสลิปใหม่")');return baseFetch(url.toString(),init)}catch(error){console.warn('Store payment-status filter skipped',error)}}return baseFetch(input,init)}})();
   </script>
+  <script src="./shared/ap-central-config-fallback.js?v=central-config-v1"></script>
 </body>
 </html>

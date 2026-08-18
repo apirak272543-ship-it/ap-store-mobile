@@ -22,13 +22,44 @@
     app(active, content);
     const access = await M.auth.requireRole('store_owner', { loginUrl: 'login.html', container: $('[data-page-content]') });
     if (!access) return null;
+    const controls = await M.request(`account_controls?select=status,suspension_reason,feature_overrides&user_id=eq.${encodeURIComponent(access.user.id)}&limit=1`, { private: true, cacheTtlMs: 10_000, cacheKey: `merchant-account-control:${access.user.id}` });
+    const control = controls?.[0] || { status: 'active', feature_overrides: {} };
+    if (control.status === 'suspended') {
+      $('[data-page-content]').innerHTML = M.ui.error('บัญชีร้านค้าถูกระงับการใช้งาน', control.suspension_reason || 'กรุณาติดต่อผู้ดูแลระบบ');
+      return null;
+    }
     const store = await ownStore(access.user);
     if (!store) {
       $('[data-page-content]').innerHTML = M.ui.error('ไม่พบข้อมูลร้านค้าที่ผูกกับบัญชีนี้', 'กรุณาติดต่อผู้ดูแลระบบ');
       return null;
     }
-    return { ...access, store };
+    const config = await readCentralConfig(access.user.id);
+    mountCentralConfig(config);
+    return { ...access, store, control, config };
   }
+
+  async function readCentralConfig(userId) {
+    const read = async (path, options = {}) => { try { return await M.request(path, options); } catch (error) { console.warn('Store central config read skipped', error); return []; } };
+    const [publicRows, paymentRows] = await Promise.all([
+      read('platform_configs?select=key,value&key=in.(brand_public,customer_promotions)', { cacheTtlMs: 30_000, cacheKey: 'merchant-platform-public-configs' }),
+      read('platform_configs?select=key,value&key=eq.payment_public', { private: true, cacheTtlMs: 30_000, cacheKey: `merchant-payment-public:${userId}` }),
+    ]);
+    const rows = [...(publicRows || []), ...(paymentRows || [])];
+    return { brand: rows.find(row => row.key === 'brand_public')?.value || {}, promotions: rows.find(row => row.key === 'customer_promotions')?.value || {}, payment: rows.find(row => row.key === 'payment_public')?.value || {} };
+  }
+
+  const configValue = (value, keys, fallback = '') => keys.map(key => value?.[key]).find(item => item !== undefined && item !== null && String(item).trim() !== '') ?? fallback;
+  const safeAsset = value => { const text = String(value || '').trim(); return /^https?:/i.test(text) || text.toLowerCase().startsWith('data:image/') ? text : ''; };
+  function centralConfigMarkup(config) {
+    const brand = config?.brand || {}, promotions = Array.isArray(config?.promotions?.items) ? config.promotions.items.filter(item => item && item.active !== false) : [];
+    const name = configValue(brand, ['brand_name', 'brandName', 'name', 'title'], 'AP Service');
+    const logo = safeAsset(configValue(brand, ['logo_url', 'logoUrl', 'logo']));
+    const background = safeAsset(configValue(brand, ['background_url', 'backgroundUrl', 'background']));
+    const banner = safeAsset(configValue(brand, ['banner_url', 'bannerUrl', 'banner']));
+    const payment = config?.payment || {}, provider = configValue(payment, ['provider'], 'ยังไม่กำหนด');
+    return `<section class="mpa-card" data-central-config-card style="margin-bottom:18px;overflow:hidden;padding:0"><div style="display:flex;align-items:center;gap:12px;padding:14px 16px;background:${background ? `linear-gradient(90deg,rgba(24,18,10,.72),rgba(24,18,10,.18)),url('${h(background)}') center/cover` : 'linear-gradient(135deg,#fff7e8,#fff)'};color:${background ? '#fff' : 'inherit'}"><div style="width:52px;height:52px;border-radius:15px;overflow:hidden;display:grid;place-items:center;background:rgba(255,255,255,.78);font-size:25px;flex:0 0 auto">${logo ? `<img src="${h(logo)}" alt="" style="width:100%;height:100%;object-fit:cover">` : '🍽️'}</div><div><strong>${h(name)}</strong><div style="font-size:11px;opacity:.85">ค่ากลางจาก Admin · ช่องทางชำระเงิน: ${h(provider)}</div></div></div>${banner ? `<img src="${h(banner)}" alt="แบนเนอร์จาก Admin" loading="lazy" style="display:block;width:100%;max-height:150px;object-fit:cover">` : ''}<div style="padding:12px 16px"><strong style="font-size:12px">โปรโมชันที่เผยแพร่</strong>${promotions.length ? `<div style="display:grid;gap:8px;margin-top:9px">${promotions.slice(0, 4).map(item => `<div style="display:flex;gap:9px;align-items:center"><div style="width:38px;height:38px;border-radius:10px;overflow:hidden;background:#fff4dc;display:grid;place-items:center;flex:0 0 auto">${safeAsset(item.image_url) ? `<img src="${h(safeAsset(item.image_url))}" alt="" style="width:100%;height:100%;object-fit:cover">` : '✦'}</div><div><strong style="font-size:11px">${h(item.badge ? `${item.badge} · ` : '')}${h(item.title || 'โปรโมชัน')}</strong><div class="mpa-muted">${h(item.description || '')}</div></div></div>`).join('')}</div>` : '<p class="mpa-muted" style="margin:8px 0 0">ยังไม่มีโปรโมชันที่เปิดเผย</p>'}<p class="mpa-muted" style="margin:10px 0 0">กฎธุรกิจส่วนกลางไม่ถูกเปิดให้อ่านจากบทบาทร้านค้าตาม RLS ปัจจุบัน</p></div></section>`;
+  }
+  function mountCentralConfig(config) { const host = $('[data-page-content]'); if (!host) return; host.insertAdjacentHTML('afterbegin', centralConfigMarkup(config)); }
 
   async function login() {
     document.body.innerHTML = `<main class="mpa-shell" style="min-height:100vh;display:grid;place-items:center"><section class="mpa-card" style="width:min(430px,100%)"><h1>เข้าสู่ระบบร้านค้า</h1><p class="mpa-muted">ใช้บัญชีเจ้าของร้านที่ผู้ดูแลระบบสร้างให้</p><form id="login"><div class="mpa-field"><label>อีเมล</label><input id="email" type="email" required></div><div class="mpa-field"><label>รหัสผ่าน</label><input id="password" type="password" required></div><button class="mpa-button" style="width:100%">เข้าสู่ระบบร้านค้า</button></form><p class="mpa-muted"><a href="../store.html">เปิด Store fallback เดิม</a></p></section></main>`;
