@@ -7,7 +7,7 @@ import { DEFAULT_NOTIFICATION_PREFERENCES, loadNotificationPreferences, Notifica
 import { notificationToneLabel, notifyNewOrder, notifyStoreActionConfirmed, playStoreNotificationPreview, setupStoreNotifications } from "./src/notifications";
 import { applyOtaUpdate, downloadOtaUpdate, OtaResult } from "./src/ota";
 
-const CONSOLE_URL = "https://apirak272543-ship-it.github.io/Apservice-/store.html";
+const CONSOLE_URL = "https://apirak272543-ship-it.github.io/ap-store-mobile/merchant/";
 const SESSION_STORAGE_KEY = "apcx_store_supabase_session";
 const TONES: NotificationTone[] = ["ap_chime", "ap_urgent", "ap_priority"];
 
