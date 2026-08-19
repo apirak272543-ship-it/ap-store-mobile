@@ -4,6 +4,7 @@
   const C = window.APServiceCore;
   const $ = selector => document.querySelector(selector);
   const h = M.ui.escapeHtml;
+  const newEntityId = prefix => `${prefix}-${typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
   if (!document.getElementById('merchant-modern-theme-style')) document.head.insertAdjacentHTML('beforeend', '<link id="merchant-modern-theme-style" rel="stylesheet" href="merchant-modern-theme.css?v=merchant-soft-art-v1">');
   const page = document.body.dataset.page;
   const pageScope = name => { const scope = M.network.createScope(name); addEventListener('pagehide', () => scope.dispose(), { once: true }); return scope; };
@@ -172,7 +173,7 @@
         categoryRows = categories || []; $('#category').innerHTML = categoryOptions(''); render(rows || []);
       } catch (err) { $('#list').innerHTML = M.ui.error('โหลดเมนูไม่สำเร็จ', err.message); }
     };
-    $('#add').onsubmit = async event => { event.preventDefault(); try { await M.request('menu_items', { method: 'POST', private: true, headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ store_id: ctx.store.id, name: $('#name').value.trim(), emoji: '🍜', description: $('#description').value.trim(), price: Number($('#price').value), stock: Number($('#stock').value), available: true, promo: $('#promo').checked, category_id: $('#category').value || null, image_url: draftMedia.image_url || null }) }); M.ui.setNotice('เพิ่มเมนูแล้ว'); event.target.reset(); draftMedia.image_url = ''; $('#preview-menu-image').hidden = true; $('#menuMediaStatus').textContent = 'ยังไม่มีการเลือกรูปภาพ'; load(); } catch (err) { M.ui.setNotice(err.message, 'error'); } };
+    $('#add').onsubmit = async event => { event.preventDefault(); try { await M.request('menu_items', { method: 'POST', private: true, headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ id: newEntityId('menu'), store_id: ctx.store.id, name: $('#name').value.trim(), emoji: '🍜', description: $('#description').value.trim(), price: Number($('#price').value), stock: Number($('#stock').value), available: true, promo: $('#promo').checked, category_id: $('#category').value || null, image_url: draftMedia.image_url || null }) }); M.ui.setNotice('เพิ่มเมนูแล้ว'); event.target.reset(); draftMedia.image_url = ''; $('#preview-menu-image').hidden = true; $('#menuMediaStatus').textContent = 'ยังไม่มีการเลือกรูปภาพ'; load(); } catch (err) { M.ui.setNotice(err.message, 'error'); } };
     bindNewImage(); load();
   }
 
