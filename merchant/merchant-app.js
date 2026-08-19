@@ -92,21 +92,39 @@
   }
 
   async function orders() {
-    const ctx = await gate('orders', `<div class="mpa-page-head"><div><h1>ออร์เดอร์ของร้าน</h1><p>เปลี่ยนได้เฉพาะสถานะที่ Shared Core อนุญาต</p></div></div><section id="list" class="mpa-card">${M.ui.loading('กำลังโหลดออร์เดอร์…')}</section>`);
+    const ctx = await gate('orders', `<div class="mpa-page-head"><div><h1>ออร์เดอร์ของร้าน</h1><p>แยกออร์เดอร์ใหม่ งานที่กำลังดำเนินการ และประวัติ โดยเปลี่ยนสถานะได้เฉพาะที่ Shared Core อนุญาต</p></div></div><section id="list" class="mpa-order-stack">${M.ui.loading('กำลังโหลดออร์เดอร์…')}</section>`);
     if (!ctx) return;
-    const scope = pageScope('merchant:orders'); const path = `delivery_orders?select=id,customer_name,status,total,payable,ordered_at,delivery_address&store_id=eq.${encodeURIComponent(ctx.store.id)}&order=ordered_at.desc&limit=200`; let lastSignature = '';
+    const scope = pageScope('merchant:orders'); const path = `delivery_orders?select=id,customer_name,status,total,payable,ordered_at,updated_at,delivery_address,note,payment_method&store_id=eq.${encodeURIComponent(ctx.store.id)}&order=ordered_at.desc&limit=200`; let lastSignature = '';
+    const bucketFor = status => {
+      const text = String(status || '');
+      if (/สำเร็จ|ยกเลิก|ปฏิเสธ|คืนเงิน/.test(text)) return 'history';
+      if (/ใหม่|รอร้าน|รอตอบรับ|รอรับ/.test(text)) return 'new';
+      return 'active';
+    };
     const render = rows => {
       const signature = JSON.stringify((rows || []).map(row => [row.id, row.status, row.updated_at])); if (signature === lastSignature) return; lastSignature = signature;
-      $('#list').innerHTML = rows.length ? `<div class="mpa-table-wrap"><table class="mpa-table"><thead><tr><th>เวลา</th><th>ลูกค้า/ที่อยู่</th><th>สถานะ</th><th>ยอด</th><th>ดำเนินการ</th></tr></thead><tbody>${rows.map(row => {
-        const choices = Object.values(C.contracts.orderStatus).filter(next => C.order.canTransition({ from: row.status, to: next, actor: 'merchant' }).ok);
-        return `<tr><td>${new Date(row.ordered_at).toLocaleString('th-TH')}</td><td>${h(row.customer_name || '-')}<br><span class="mpa-muted">${h(row.delivery_address || '')}</span></td><td><span class="mpa-badge">${h(row.status)}</span></td><td>${M.ui.baht(row.payable ?? row.total)}</td><td>${choices.length ? `<select data-status="${h(row.id)}"><option value="">เลือก…</option>${choices.map(item => `<option>${h(item)}</option>`).join('')}</select>` : '—'}</td></tr>`;
-      }).join('')}</tbody></table></div>` : M.ui.empty('ยังไม่มีออร์เดอร์');
+      if (!rows.length) { $('#list').innerHTML = M.ui.empty('ยังไม่มีออร์เดอร์'); return; }
+      const sections = [
+        { key: 'new', title: 'ออร์เดอร์ใหม่', caption: 'รายการที่ต้องตรวจสอบและตอบรับ', tone: 'new' },
+        { key: 'active', title: 'กำลังดำเนินการ', caption: 'รายการที่ร้านกำลังจัดเตรียมหรือส่งต่อ', tone: 'active' },
+        { key: 'history', title: 'ประวัติ', caption: 'รายการสำเร็จ ยกเลิก หรือปิดงานแล้ว', tone: 'history' },
+      ];
+      $('#list').innerHTML = sections.map(section => {
+        const entries = rows.filter(row => bucketFor(row.status) === section.key);
+        const cards = entries.length ? entries.map(row => {
+          const choices = Object.values(C.contracts.orderStatus).filter(next => C.order.canTransition({ from: row.status, to: next, actor: 'merchant' }).ok);
+          const orderTime = row.ordered_at ? new Date(row.ordered_at).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }) : 'ไม่พบเวลา';
+          return `<article class="mpa-order-card"><div class="mpa-order-card__head"><div><span class="mpa-kicker">${h(row.id || 'ORDER')}</span><h3>${h(row.customer_name || 'ไม่ระบุชื่อลูกค้า')}</h3></div><span class="mpa-badge">${h(row.status || 'ไม่ทราบสถานะ')}</span></div><div class="mpa-order-card__meta"><span>🕒 ${h(orderTime)}</span><span>💳 ${h(row.payment_method || 'ยังไม่ระบุวิธีชำระ')}</span></div><p class="mpa-order-card__address">📍 ${h(row.delivery_address || 'ยังไม่มีที่อยู่จัดส่ง')}</p>${row.note ? `<p class="mpa-order-card__note">หมายเหตุ: ${h(row.note)}</p>` : ''}<div class="mpa-order-card__foot"><strong>${M.ui.baht(row.payable ?? row.total)}</strong>${choices.length ? `<label class="mpa-order-card__action"><span>อัปเดตงาน</span><select data-status="${h(row.id)}"><option value="">เลือกสถานะ…</option>${choices.map(item => `<option value="${h(item)}">${h(item)}</option>`).join('')}</select></label>` : '<span class="mpa-muted">ไม่มีการดำเนินการเพิ่มเติม</span>'}</div></article>`;
+        }).join('') : `<p class="mpa-muted mpa-group-empty">ไม่มี${section.title.toLowerCase()}ในขณะนี้</p>`;
+        return `<section class="mpa-order-group" data-order-group="${section.key}"><div class="mpa-order-group__head"><div><span class="mpa-kicker mpa-kicker--${section.tone}">${section.title}</span><p>${section.caption}</p></div><strong>${entries.length}</strong></div><div class="mpa-order-grid">${cards}</div></section>`;
+      }).join('');
       document.querySelectorAll('[data-status]').forEach(select => select.onchange = async () => {
         if (!select.value) return;
+        select.disabled = true;
         try {
           await M.request(`delivery_orders?id=eq.${encodeURIComponent(select.dataset.status)}`, { method: 'PATCH', private: true, headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ status: select.value, updated_at: M.ui.nowIso() }) });
           M.ui.setNotice('อัปเดตสถานะออร์เดอร์แล้ว'); setTimeout(() => location.reload(), 350);
-        } catch (err) { M.ui.setNotice(err.message, 'error'); }
+        } catch (err) { select.disabled = false; M.ui.setNotice(err.message, 'error'); }
       });
     };
     try { render(await scope.request(path, { private: true, cacheTtlMs: 10_000, cacheKey: `merchant-orders:${ctx.store.id}` })); } catch (err) { if (err.code !== M.network.STALE_RESPONSE) $('#list').innerHTML = M.ui.error('โหลดออร์เดอร์ไม่สำเร็จ', err.message); return; }
@@ -114,22 +132,47 @@
   }
 
   async function menu() {
-    const ctx = await gate('menu', `<div class="mpa-page-head"><div><h1>เมนูและสต็อก</h1><p>เพิ่มหรือแก้ไขเมนูของร้านที่กำลังล็อกอิน</p></div></div><section class="mpa-card"><form id="add"><div class="mpa-grid" style="grid-template-columns:repeat(3,minmax(0,1fr))"><div class="mpa-field"><label>ชื่อเมนู</label><input id="name" required></div><div class="mpa-field"><label>ราคา</label><input id="price" type="number" min="0" required></div><div class="mpa-field"><label>สต็อก</label><input id="stock" type="number" min="0" value="0"></div></div><button class="mpa-button">เพิ่มเมนู</button></form></section><section id="list" class="mpa-card" style="margin-top:18px">${M.ui.loading('กำลังโหลดเมนู…')}</section>`);
+    const ctx = await gate('menu', `<div class="mpa-page-head"><div><h1>เมนูและสต็อก</h1><p>เพิ่ม แก้ไขรูปภาพ ราคา สต็อก และสถานะขายของเมนูที่อยู่ในร้านของคุณ</p></div></div><section class="mpa-card mpa-menu-editor"><form id="add"><div class="mpa-grid mpa-menu-editor__fields"><div class="mpa-field"><label>ชื่อเมนู</label><input id="name" required maxlength="120"></div><div class="mpa-field"><label>หมวดเมนู</label><select id="category"><option value="">ยังไม่จัดหมวด</option></select></div><div class="mpa-field"><label>ราคา (บาท)</label><input id="price" type="number" min="0" step="0.01" required></div><div class="mpa-field"><label>สต็อก</label><input id="stock" type="number" min="0" value="0" required></div><div class="mpa-field mpa-menu-editor__wide"><label>รายละเอียด</label><input id="description" maxlength="280" placeholder="บอกรายละเอียดสั้น ๆ ให้ลูกค้าตัดสินใจง่ายขึ้น"></div></div><div class="mpa-menu-media"><img id="preview-menu-image" alt="ตัวอย่างรูปเมนูใหม่" loading="lazy" hidden><div><strong>รูปเมนู</strong><p class="mpa-muted">เลือกจากคลังหรือถ่ายจากกล้อง ระบบบีบอัด JPEG อัตโนมัติไม่เกิน 1200px ที่คุณภาพ 0.82</p><label class="mpa-button mpa-button-secondary">เลือกจากคลัง<input type="file" accept="image/jpeg,image/png,image/webp" data-new-menu-image hidden></label><label class="mpa-button mpa-button-secondary">ถ่ายจากกล้อง<input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" data-new-menu-image hidden></label></div></div><label class="mpa-check"><input id="promo" type="checkbox"> เมนูโปรโมชัน</label><p id="menuMediaStatus" class="mpa-muted" aria-live="polite">ยังไม่มีการเลือกรูปภาพ</p><button class="mpa-button">เพิ่มเมนู</button></form></section><section id="list" class="mpa-menu-list">${M.ui.loading('กำลังโหลดเมนู…')}</section>`);
     if (!ctx) return;
+    const draftMedia = { image_url: '' };
+    let categoryRows = [];
+    const categoryOptions = selected => `<option value="">ยังไม่จัดหมวด</option>${categoryRows.filter(row => row.active !== false || row.id === selected).map(row => `<option value="${h(row.id)}" ${row.id === selected ? 'selected' : ''}>${h(row.icon || '🍽️')} ${h(row.name)}</option>`).join('')}`;
+    const writeMenuImage = async (file, itemId = '') => {
+      if (!file) return '';
+      if (!window.APServiceMedia?.uploadPublicCatalogImage) throw new Error('ระบบอัปโหลดรูปภาพยังโหลดไม่พร้อม กรุณารีเฟรชแล้วลองใหม่');
+      const session = await M.auth.refreshSession(false);
+      if (!session?.access_token || !session?.user?.id) throw new Error('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่ก่อนอัปโหลด');
+      const uploaded = await window.APServiceMedia.uploadPublicCatalogImage(file, { url: M.config.url, publishableKey: M.config.publishableKey, accessToken: session.access_token, actorId: session.user.id, pathPrefix: 'merchant', scope: `menu-${ctx.store.id}-${itemId || 'draft'}`, mediaType: 'PRODUCT_IMAGE', ownerType: 'merchant' });
+      return uploaded.publicUrl;
+    };
+    const bindNewImage = () => document.querySelectorAll('[data-new-menu-image]').forEach(input => input.addEventListener('change', async () => {
+      const file = input.files?.[0]; if (!file) return;
+      const status = $('#menuMediaStatus');
+      try {
+        status.textContent = 'กำลังอัปโหลดและตรวจสอบรูปเมนู…'; draftMedia.image_url = await writeMenuImage(file); const preview = $('#preview-menu-image'); preview.src = draftMedia.image_url; preview.hidden = false; status.textContent = 'รูปเมนูพร้อมแล้ว กดเพิ่มเมนูเพื่อบันทึก';
+      } catch (err) { input.value = ''; status.textContent = err.message || 'อัปโหลดรูปเมนูไม่สำเร็จ'; M.ui.setNotice(status.textContent, 'error'); }
+    }));
+    const render = rows => {
+      if (!rows.length) { $('#list').innerHTML = M.ui.empty('ยังไม่มีเมนู'); return; }
+      const categoryById = new Map(categoryRows.map(row => [row.id, row]));
+      const groups = categoryRows.filter(row => row.active !== false).map(category => ({ id: category.id, name: category.name, icon: category.icon || '🍽️', rows: rows.filter(row => row.category_id === category.id) })).filter(group => group.rows.length);
+      const ungrouped = rows.filter(row => !row.category_id || !categoryById.has(row.category_id)); if (ungrouped.length) groups.push({ id: '', name: 'ยังไม่จัดหมวด', icon: '⋯', rows: ungrouped });
+      $('#list').innerHTML = groups.map(group => `<section class="mpa-menu-group"><div class="mpa-menu-group__head"><div><span>${h(group.icon)}</span><h2>${h(group.name)}</h2></div><strong>${group.rows.length}</strong></div><div class="mpa-menu-grid">${group.rows.map(row => `<article class="mpa-menu-card"><div class="mpa-menu-card__media">${safeAsset(row.image_url) ? `<img src="${h(safeAsset(row.image_url))}" alt="${h(row.name)}" loading="lazy">` : `<span>${h(row.emoji || '🍜')}</span>`}</div><div class="mpa-menu-card__body"><div class="mpa-menu-card__head"><div><h3>${h(row.name)}</h3>${row.promo ? '<span class="mpa-badge">โปรโมชัน</span>' : ''}</div><strong>${M.ui.baht(row.price)}</strong></div><p>${h(row.description || 'ยังไม่มีรายละเอียดเมนู')}</p><div class="mpa-menu-card__stock"><span>คงเหลือ <strong>${Number(row.stock || 0)}</strong></span><label class="mpa-switch"><input type="checkbox" data-menu-available="${h(row.id)}" ${row.available ? 'checked' : ''}><span>พร้อมขาย</span></label></div><details class="mpa-menu-card__edit"><summary>แก้ไขเมนู</summary><form data-menu-edit="${h(row.id)}"><div class="mpa-grid"><div class="mpa-field"><label>ชื่อ</label><input name="name" value="${h(row.name)}" required maxlength="120"></div><div class="mpa-field"><label>หมวด</label><select name="category_id">${categoryOptions(row.category_id || '')}</select></div><div class="mpa-field"><label>ราคา</label><input name="price" type="number" min="0" step="0.01" value="${Number(row.price || 0)}" required></div><div class="mpa-field"><label>สต็อก</label><input name="stock" type="number" min="0" value="${Number(row.stock || 0)}" required></div><div class="mpa-field mpa-menu-editor__wide"><label>รายละเอียด</label><input name="description" value="${h(row.description || '')}" maxlength="280"></div></div><label class="mpa-check"><input name="promo" type="checkbox" ${row.promo ? 'checked' : ''}> เมนูโปรโมชัน</label><button class="mpa-button" type="submit">บันทึกการแก้ไข</button></form></details><div class="mpa-menu-card__image-actions"><label class="mpa-button mpa-button-secondary">เปลี่ยนจากคลัง<input type="file" accept="image/jpeg,image/png,image/webp" data-menu-image="${h(row.id)}" hidden></label><label class="mpa-button mpa-button-secondary">ถ่ายรูปใหม่<input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" data-menu-image="${h(row.id)}" hidden></label></div></div></article>`).join('')}</div></section>`).join('');
+      document.querySelectorAll('[data-menu-available]').forEach(input => input.onchange = async () => { input.disabled = true; try { await M.request(`menu_items?id=eq.${encodeURIComponent(input.dataset.menuAvailable)}`, { method: 'PATCH', private: true, headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ available: input.checked, updated_at: M.ui.nowIso() }) }); M.ui.setNotice(input.checked ? 'เปิดขายเมนูแล้ว' : 'ปิดขายเมนูแล้ว'); } catch (err) { input.checked = !input.checked; M.ui.setNotice(err.message, 'error'); } finally { input.disabled = false; } });
+      document.querySelectorAll('[data-menu-edit]').forEach(form => form.onsubmit = async event => { event.preventDefault(); const fields = event.currentTarget.elements; try { await M.request(`menu_items?id=eq.${encodeURIComponent(event.currentTarget.dataset.menuEdit)}`, { method: 'PATCH', private: true, headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ name: fields.name.value.trim(), description: fields.description.value.trim(), price: Number(fields.price.value), stock: Number(fields.stock.value), category_id: fields.category_id.value || null, promo: fields.promo.checked, updated_at: M.ui.nowIso() }) }); M.ui.setNotice('บันทึกเมนูแล้ว'); load(); } catch (err) { M.ui.setNotice(err.message, 'error'); } });
+      document.querySelectorAll('[data-menu-image]').forEach(input => input.addEventListener('change', async () => { const file = input.files?.[0]; if (!file) return; try { const image_url = await writeMenuImage(file, input.dataset.menuImage); await M.request(`menu_items?id=eq.${encodeURIComponent(input.dataset.menuImage)}`, { method: 'PATCH', private: true, headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ image_url, updated_at: M.ui.nowIso() }) }); M.ui.setNotice('อัปเดตรูปเมนูแล้ว'); load(); } catch (err) { input.value = ''; M.ui.setNotice(err.message || 'อัปโหลดรูปเมนูไม่สำเร็จ', 'error'); } }));
+    };
     const load = async () => {
       try {
-        const rows = await M.request(`menu_items?select=id,name,emoji,description,price,stock,available&store_id=eq.${encodeURIComponent(ctx.store.id)}&order=name.asc`, { private: true });
-        $('#list').innerHTML = rows.length ? `<div class="mpa-table-wrap"><table class="mpa-table"><thead><tr><th>เมนู</th><th>ราคา</th><th>สต็อก</th><th>พร้อมขาย</th></tr></thead><tbody>${rows.map(row => `<tr><td>${h(row.emoji || '🍜')} ${h(row.name)}</td><td>${M.ui.baht(row.price)}</td><td>${row.stock}</td><td>${row.available ? 'พร้อม' : 'ปิดขาย'}</td></tr>`).join('')}</tbody></table></div>` : M.ui.empty('ยังไม่มีเมนู');
+        const [rows, categories] = await Promise.all([
+          M.request(`menu_items?select=id,name,emoji,description,price,stock,available,promo,image_url,category_id,updated_at&store_id=eq.${encodeURIComponent(ctx.store.id)}&order=name.asc`, { private: true }),
+          M.request(`menu_categories?select=id,name,icon,sort_order,active&store_id=eq.${encodeURIComponent(ctx.store.id)}&order=sort_order.asc`, { private: true }).catch(() => []),
+        ]);
+        categoryRows = categories || []; $('#category').innerHTML = categoryOptions(''); render(rows || []);
       } catch (err) { $('#list').innerHTML = M.ui.error('โหลดเมนูไม่สำเร็จ', err.message); }
     };
-    $('#add').onsubmit = async event => {
-      event.preventDefault();
-      try {
-        await M.request('menu_items', { method: 'POST', private: true, headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ store_id: ctx.store.id, name: $('#name').value.trim(), emoji: '🍜', price: Number($('#price').value), stock: Number($('#stock').value), available: true }) });
-        M.ui.setNotice('เพิ่มเมนูแล้ว'); event.target.reset(); load();
-      } catch (err) { M.ui.setNotice(err.message, 'error'); }
-    };
-    load();
+    $('#add').onsubmit = async event => { event.preventDefault(); try { await M.request('menu_items', { method: 'POST', private: true, headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ store_id: ctx.store.id, name: $('#name').value.trim(), emoji: '🍜', description: $('#description').value.trim(), price: Number($('#price').value), stock: Number($('#stock').value), available: true, promo: $('#promo').checked, category_id: $('#category').value || null, image_url: draftMedia.image_url || null }) }); M.ui.setNotice('เพิ่มเมนูแล้ว'); event.target.reset(); draftMedia.image_url = ''; $('#preview-menu-image').hidden = true; $('#menuMediaStatus').textContent = 'ยังไม่มีการเลือกรูปภาพ'; load(); } catch (err) { M.ui.setNotice(err.message, 'error'); } };
+    bindNewImage(); load();
   }
 
   async function store() {
