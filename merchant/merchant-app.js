@@ -14,7 +14,7 @@
   };
 
   async function ownStore(user) {
-    const rows = await M.request(`stores?select=id,name,description,phone,eta,active,owner_id,image_url,background_url&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`, { private: true, cacheTtlMs: 10_000, cacheKey: `merchant-store:${user.id}` });
+    const rows = await M.request(`stores?select=id,name,description,phone,eta,active,owner_id,image_url,background_url,settlement_mode,settlement_credit_days,settlement_gp_percent,payout_method,payout_bank_name,payout_account_name,payout_account_number,payout_qr_url,settlement_note&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`, { private: true, cacheTtlMs: 10_000, cacheKey: `merchant-store:${user.id}` });
     return rows?.[0] || null;
   }
 
@@ -202,12 +202,49 @@
   }
 
   async function finance() {
-    const ctx = await gate('finance', `<div class="mpa-page-head"><div><h1>การเงินร้านค้า</h1><p>แสดง settlement และยอดขายตามสิทธิ์ของร้าน</p></div></div><section id="list" class="mpa-card">${M.ui.loading('กำลังโหลดข้อมูลการเงิน…')}</section>`);
+    const ctx = await gate('finance', `<div class="mpa-page-head"><div><h1>การเงินร้านค้า</h1><p>ดูรอบสรุปยอดที่ Admin อนุมัติให้ร้าน พร้อมรายละเอียดการจ่ายเงินจริง</p></div></div><section id="finance">${M.ui.loading('กำลังโหลดข้อมูลการเงิน…')}</section>`);
     if (!ctx) return;
-    try {
-      const rows = await M.request(`settlements?select=*&store_id=eq.${encodeURIComponent(ctx.store.id)}&order=created_at.desc&limit=100`, { private: true });
-      $('#list').innerHTML = rows.length ? `<pre style="white-space:pre-wrap">${h(JSON.stringify(rows, null, 2))}</pre>` : M.ui.empty('ยังไม่มีรอบสรุปยอดสำหรับร้านนี้');
-    } catch (err) { $('#list').innerHTML = M.ui.error('โหลดข้อมูลการเงินไม่สำเร็จ', err.message); }
+    const scope = pageScope('merchant:finance');
+    const path = `settlements?select=id,status,gross_amount,gp_percent,gp_amount,net_amount,period_start,period_end,due_date,paid_at,created_at,payment_reference,payment_note,proof_image_url&store_id=eq.${encodeURIComponent(ctx.store.id)}&recipient_type=eq.store&order=created_at.desc&limit=100`;
+    let lastSignature = '';
+    const dateLabel = value => value ? new Date(value).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }) : 'ยังไม่ระบุ';
+    const dateOnly = value => value ? new Date(value).toLocaleDateString('th-TH', { dateStyle: 'medium' }) : 'ยังไม่ระบุ';
+    const amount = value => Number.isFinite(Number(value)) ? M.ui.baht(Number(value)) : 'ไม่พบยอด';
+    const summaryAmount = rows => rows.length ? amount(rows.reduce((total, row) => total + Number(row.net_amount || 0), 0)) : 'ไม่มีข้อมูล';
+    const settlementStatus = status => ({ paid: 'จ่ายแล้ว', pending: 'รอจ่าย', void: 'ยกเลิก' }[String(status || '').toLowerCase()] || 'ไม่ทราบสถานะ');
+    const settlementTone = status => String(status || '').toLowerCase() === 'paid' ? 'mpa-finance-status--paid' : String(status || '').toLowerCase() === 'pending' ? 'mpa-finance-status--pending' : 'mpa-finance-status--void';
+    const maskedAccount = value => { const text = String(value || '').trim(); return text ? `${'•'.repeat(Math.max(0, text.length - 4))}${text.slice(-4)}` : 'ยังไม่ระบุ'; };
+    const renderPayout = () => {
+      const config = [
+        ['รูปแบบสรุปยอด', ctx.store.settlement_mode],
+        ['เครดิตการจ่ายเงิน', Number.isFinite(Number(ctx.store.settlement_credit_days)) ? `${Number(ctx.store.settlement_credit_days)} วัน` : 'ยังไม่ระบุ'],
+        ['ช่องทางรับเงิน', ctx.store.payout_method],
+        ['ธนาคาร', ctx.store.payout_bank_name],
+        ['ชื่อบัญชี', ctx.store.payout_account_name],
+        ['เลขบัญชี', maskedAccount(ctx.store.payout_account_number)],
+      ].filter(([, value]) => String(value || '').trim());
+      if (!config.length && !ctx.store.settlement_note) return '';
+      return `<section class="mpa-card mpa-finance-payout"><div><span class="mpa-kicker">การรับเงิน</span><h2>ข้อมูลรับชำระของร้าน</h2><p class="mpa-muted">ข้อมูลนี้ถูกตั้งค่าจากศูนย์กลางและแสดงแบบอ่านอย่างเดียว</p></div><dl>${config.map(([label, value]) => `<div><dt>${h(label)}</dt><dd>${h(value)}</dd></div>`).join('')}</dl>${ctx.store.settlement_note ? `<p class="mpa-finance-note">${h(ctx.store.settlement_note)}</p>` : ''}</section>`;
+    };
+    const render = rows => {
+      const normalized = Array.isArray(rows) ? rows : [];
+      const signature = JSON.stringify(normalized.map(row => [row.id, row.status, row.net_amount, row.gp_amount, row.paid_at, row.updated_at]));
+      if (signature === lastSignature) return;
+      lastSignature = signature;
+      if (!normalized.length) {
+        $('#finance').innerHTML = `<section class="mpa-card">${M.ui.empty('ยังไม่มีรอบสรุปยอดสำหรับร้านนี้', 'เมื่อ Admin สร้างและอนุมัติรอบการจ่ายเงิน รายการจะแสดงในหน้านี้')}</section>${renderPayout()}`;
+        return;
+      }
+      const eligible = normalized.filter(row => String(row.status || '').toLowerCase() !== 'void');
+      const paid = eligible.filter(row => String(row.status || '').toLowerCase() === 'paid');
+      const pending = eligible.filter(row => String(row.status || '').toLowerCase() === 'pending');
+      const gross = eligible.reduce((total, row) => total + Number(row.gross_amount || 0), 0);
+      const gp = eligible.reduce((total, row) => total + Number(row.gp_amount || 0), 0);
+      $('#finance').innerHTML = `<div class="mpa-grid cards mpa-finance-summary"><article class="mpa-card mpa-stat"><small>ยอดขายตามรอบที่ใช้งาน</small><strong>${amount(gross)}</strong><span>${eligible.length} รอบ · ไม่รวมรายการยกเลิก</span></article><article class="mpa-card mpa-stat"><small>ยอดสุทธิที่จ่ายแล้ว</small><strong>${summaryAmount(paid)}</strong><span>${paid.length ? `${paid.length} รอบที่ยืนยันการจ่าย` : 'ยังไม่มีรอบที่จ่ายแล้ว'}</span></article><article class="mpa-card mpa-stat"><small>ยอดสุทธิรอจ่าย</small><strong>${summaryAmount(pending)}</strong><span>${pending.length ? `${pending.length} รอบที่กำลังรอการจ่าย` : 'ไม่มีรายการรอจ่าย'}</span></article><article class="mpa-card mpa-stat"><small>GP แพลตฟอร์มตามรอบ</small><strong>${amount(gp)}</strong><span>ใช้ยอดที่ Admin บันทึกใน settlement</span></article></div><section class="mpa-card mpa-finance-ledger"><div class="mpa-finance-ledger__head"><div><span class="mpa-kicker">ประวัติ settlement</span><h2>รอบสรุปยอด</h2></div><span class="mpa-muted">${normalized.length} รายการ</span></div><div class="mpa-finance-list">${normalized.map(row => `<article class="mpa-finance-row"><div class="mpa-finance-row__head"><div><strong>${h(row.id || 'SETTLEMENT')}</strong><span>สร้างเมื่อ ${h(dateLabel(row.created_at))}</span></div><span class="mpa-finance-status ${settlementTone(row.status)}">${h(settlementStatus(row.status))}</span></div><dl><div><dt>ช่วงคำนวณ</dt><dd>${h(dateOnly(row.period_start))} — ${h(dateOnly(row.period_end))}</dd></div><div><dt>ยอดขายรวม</dt><dd>${h(amount(row.gross_amount))}</dd></div><div><dt>GP แพลตฟอร์ม${row.gp_percent !== null && row.gp_percent !== undefined ? ` (${h(row.gp_percent)}%)` : ''}</dt><dd>${h(amount(row.gp_amount))}</dd></div><div><dt>ยอดรับสุทธิ</dt><dd class="mpa-finance-row__net">${h(amount(row.net_amount))}</dd></div><div><dt>${String(row.status || '').toLowerCase() === 'paid' ? 'จ่ายเมื่อ' : 'ครบกำหนด'}</dt><dd>${h(String(row.status || '').toLowerCase() === 'paid' ? dateLabel(row.paid_at) : dateOnly(row.due_date))}</dd></div></dl>${row.payment_reference || row.payment_note || row.proof_image_url ? `<footer>${row.payment_reference ? `<span>อ้างอิง: ${h(row.payment_reference)}</span>` : ''}${row.payment_note ? `<span>${h(row.payment_note)}</span>` : ''}${row.proof_image_url ? `<a href="${h(row.proof_image_url)}" target="_blank" rel="noopener">ดูหลักฐานการจ่าย</a>` : ''}</footer>` : ''}</article>`).join('')}</div></section>${renderPayout()}`;
+    };
+    try { render(await scope.request(path, { private: true, cacheTtlMs: 10_000, cacheKey: `merchant-finance:${ctx.store.id}` })); } catch (err) { if (err.code !== M.network.STALE_RESPONSE) $('#finance').innerHTML = M.ui.error('โหลดข้อมูลการเงินไม่สำเร็จ', err.message); return; }
+    const stop = M.network.startBackgroundSync({ key: `merchant-finance:${ctx.store.id}`, intervalMs: 20_000, task: async () => { const rows = await M.request(path, { private: true, forceFresh: true, cacheKey: `merchant-finance:${ctx.store.id}` }); const signature = JSON.stringify((rows || []).map(row => [row.id, row.status, row.net_amount, row.gp_amount, row.paid_at, row.updated_at])); return { changed: signature !== lastSignature, data: rows }; }, onData: render, onError: error => M.ui.setNotice(`อัปเดตข้อมูลการเงินไม่สำเร็จ: ${error.message}`, 'error') });
+    addEventListener('pagehide', stop, { once: true });
   }
 
   async function settings() {
