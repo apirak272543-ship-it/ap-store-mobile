@@ -12,7 +12,7 @@
 
   const app = (active, content) => {
     const nav = links.map(([key, label]) => `<a class="${active === key ? 'active' : ''}" href="${key}.html">${label}</a>`).join('');
-    document.body.innerHTML = `<header class="mpa-topbar"><a class="mpa-brand" href="dashboard.html">AP Service · ร้านค้า</a><nav class="mpa-nav">${nav}<a href="../store.html">Fallback</a></nav></header><main class="mpa-shell" data-page-content>${content}</main>`;
+    document.body.innerHTML = `<header class="mpa-topbar"><a class="mpa-brand" href="dashboard.html">AP Service · ร้านค้า</a><nav class="mpa-nav">${nav}<a href="../store.html" aria-label="เปิดระบบร้านค้าเดิม">ระบบเดิม</a></nav></header><main class="mpa-shell" data-page-content>${content}</main>`;
   };
 
   async function ownStore(user) {
