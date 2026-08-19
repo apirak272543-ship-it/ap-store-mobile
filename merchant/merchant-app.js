@@ -208,11 +208,14 @@
   }
 
   async function finance() {
-    const ctx = await gate('finance', `<div class="mpa-page-head"><div><h1>การเงินร้านค้า</h1><p>ดูรอบสรุปยอดที่ Admin อนุมัติให้ร้าน พร้อมรายละเอียดการจ่ายเงินจริง</p></div></div><section id="finance">${M.ui.loading('กำลังโหลดข้อมูลการเงิน…')}</section>`);
+    const ctx = await gate('finance', `<div class="mpa-page-head"><div><h1>การเงินและยอดขายร้านค้า</h1><p>สรุปยอดขายจากออร์เดอร์ที่ปิดสำเร็จ และรอบสรุปยอดที่ Admin อนุมัติให้ร้าน</p></div></div><section id="salesAnalytics" class="merchant-sales-analytics">${M.ui.loading('กำลังวิเคราะห์ยอดขาย…')}</section><section id="finance">${M.ui.loading('กำลังโหลดข้อมูลการเงิน…')}</section>`);
     if (!ctx) return;
     const scope = pageScope('merchant:finance');
     const path = `settlements?select=id,status,gross_amount,gp_percent,gp_amount,net_amount,period_start,period_end,due_date,paid_at,created_at,payment_reference,payment_note,proof_image_url&store_id=eq.${encodeURIComponent(ctx.store.id)}&recipient_type=eq.store&order=created_at.desc&limit=100`;
-    let lastSignature = '';
+    const thaiTimeZone = 'Asia/Bangkok';
+    const salesStart = (() => { const date = new Date(); date.setUTCMonth(date.getUTCMonth() - 11, 1); date.setUTCHours(0, 0, 0, 0); return date.toISOString(); })();
+    const salesPath = `delivery_orders?select=id,status,payable,total,completed_at,ordered_at&store_id=eq.${encodeURIComponent(ctx.store.id)}&status=eq.${encodeURIComponent(C.contracts.orderStatus.COMPLETED)}&completed_at=gte.${encodeURIComponent(salesStart)}&order=completed_at.desc&limit=1000`;
+    let lastSignature = '', lastSalesSignature = '';
     const dateLabel = value => value ? new Date(value).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }) : 'ยังไม่ระบุ';
     const dateOnly = value => value ? new Date(value).toLocaleDateString('th-TH', { dateStyle: 'medium' }) : 'ยังไม่ระบุ';
     const amount = value => Number.isFinite(Number(value)) ? M.ui.baht(Number(value)) : 'ไม่พบยอด';
@@ -220,6 +223,36 @@
     const settlementStatus = status => ({ paid: 'จ่ายแล้ว', pending: 'รอจ่าย', void: 'ยกเลิก' }[String(status || '').toLowerCase()] || 'ไม่ทราบสถานะ');
     const settlementTone = status => String(status || '').toLowerCase() === 'paid' ? 'mpa-finance-status--paid' : String(status || '').toLowerCase() === 'pending' ? 'mpa-finance-status--pending' : 'mpa-finance-status--void';
     const maskedAccount = value => { const text = String(value || '').trim(); return text ? `${'•'.repeat(Math.max(0, text.length - 4))}${text.slice(-4)}` : 'ยังไม่ระบุ'; };
+    const dayKey = value => {
+      const date = new Date(value); if (Number.isNaN(date.getTime())) return '';
+      const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: thaiTimeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date).filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
+      return `${parts.year}-${parts.month}-${parts.day}`;
+    };
+    const monthLabel = key => { const [year, month] = String(key || '').split('-').map(Number); return Number.isFinite(year) && Number.isFinite(month) ? new Intl.DateTimeFormat('th-TH', { timeZone: thaiTimeZone, month: 'short', year: 'numeric' }).format(new Date(Date.UTC(year, month - 1, 1))) : 'ไม่ระบุเดือน'; };
+    const dayLabel = key => { const [year, month, day] = String(key || '').split('-').map(Number); return Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day) ? new Intl.DateTimeFormat('th-TH', { timeZone: thaiTimeZone, day: 'numeric', month: 'short' }).format(new Date(Date.UTC(year, month - 1, day))) : 'ไม่ระบุวัน'; };
+    const monthKeys = () => { const current = dayKey(new Date()) || new Date().toISOString().slice(0, 10); const [year, month] = current.slice(0, 7).split('-').map(Number); return Array.from({ length: 12 }, (_, index) => { const date = new Date(Date.UTC(year, month - 1 - index, 1)); return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`; }); };
+    const renderSalesAnalytics = rows => {
+      const normalized = Array.isArray(rows) ? rows : [];
+      const signature = JSON.stringify(normalized.map(row => [row.id, row.status, row.payable, row.total, row.completed_at]));
+      if (signature === lastSalesSignature) return;
+      lastSalesSignature = signature;
+      const revenue = row => Math.max(0, Number(row.payable ?? row.total ?? 0));
+      const byDay = new Map(), byMonth = new Map();
+      normalized.forEach(row => {
+        const day = dayKey(row.completed_at); if (!day) return;
+        const month = day.slice(0, 7), value = revenue(row);
+        const daily = byDay.get(day) || { key: day, sales: 0, orders: 0 }; daily.sales += value; daily.orders += 1; byDay.set(day, daily);
+        const monthly = byMonth.get(month) || { key: month, sales: 0, orders: 0 }; monthly.sales += value; monthly.orders += 1; byMonth.set(month, monthly);
+      });
+      const today = dayKey(new Date()), currentMonth = today.slice(0, 7), todaySales = byDay.get(today) || { sales: 0, orders: 0 }, monthSales = byMonth.get(currentMonth) || { sales: 0, orders: 0 };
+      const daily = [...byDay.values()].filter(row => row.key.startsWith(currentMonth)).sort((left, right) => right.key.localeCompare(left.key));
+      const monthly = monthKeys().map(key => ({ key, sales: 0, orders: 0, ...(byMonth.get(key) || {}) }));
+      const maxMonthly = Math.max(1, ...monthly.map(row => row.sales));
+      const dailyMarkup = daily.length ? daily.map(row => `<article class="merchant-sales-row"><div><strong>${h(dayLabel(row.key))}</strong><span>${row.orders} ออร์เดอร์สำเร็จ</span></div><b>${h(amount(row.sales))}</b></article>`).join('') : `<div class="merchant-sales-empty">ยังไม่มีออร์เดอร์ที่ปิดสำเร็จในเดือนนี้</div>`;
+      const monthlyMarkup = monthly.map(row => `<article class="merchant-sales-month"><div class="merchant-sales-month__head"><span>${h(monthLabel(row.key))}</span><strong>${h(amount(row.sales))}</strong></div><div class="merchant-sales-month__bar"><i style="width:${Math.max(0, Math.min(100, (row.sales / maxMonthly) * 100))}%"></i></div><small>${row.orders} ออร์เดอร์สำเร็จ</small></article>`).join('');
+      $('#salesAnalytics').innerHTML = `<section class="merchant-sales-header"><div><span class="mpa-kicker">ยอดขายที่ปิดสำเร็จ</span><h2>วิเคราะห์ยอดขายรายวัน–รายเดือน</h2><p class="mpa-muted">ยอดคำนวณจาก <strong>ยอดชำระจริง</strong> ของออร์เดอร์สถานะสำเร็จเท่านั้น โดยอ้างอิงเวลาไทย</p></div><button class="mpa-button mpa-button-secondary" id="refreshSalesAnalytics" type="button">รีเฟรชยอดขาย</button></section><div class="merchant-sales-summary"><article><small>วันนี้</small><strong>${h(amount(todaySales.sales))}</strong><span>${todaySales.orders} ออร์เดอร์สำเร็จ</span></article><article><small>เดือนนี้</small><strong>${h(amount(monthSales.sales))}</strong><span>${monthSales.orders} ออร์เดอร์สำเร็จ</span></article><article><small>12 เดือนล่าสุด</small><strong>${h(amount(monthly.reduce((sum, row) => sum + row.sales, 0)))}</strong><span>${monthly.reduce((sum, row) => sum + row.orders, 0)} ออร์เดอร์สำเร็จ</span></article></div><div class="merchant-sales-grid"><section class="merchant-sales-panel"><div class="merchant-sales-panel__head"><div><h3>ยอดขายรายวันของเดือนนี้</h3><p>เรียงจากวันล่าสุด</p></div><span>${daily.length} วันที่มีรายการ</span></div><div class="merchant-sales-list">${dailyMarkup}</div></section><section class="merchant-sales-panel"><div class="merchant-sales-panel__head"><div><h3>ยอดขายรายเดือน</h3><p>ย้อนหลัง 12 เดือน</p></div></div><div class="merchant-sales-months">${monthlyMarkup}</div></section></div>`;
+      $('#refreshSalesAnalytics')?.addEventListener('click', () => loadSalesAnalytics(true));
+    };
     const renderPayout = () => {
       const config = [
         ['รูปแบบสรุปยอด', ctx.store.settlement_mode],
@@ -248,9 +281,11 @@
       const gp = eligible.reduce((total, row) => total + Number(row.gp_amount || 0), 0);
       $('#finance').innerHTML = `<div class="mpa-grid cards mpa-finance-summary"><article class="mpa-card mpa-stat"><small>ยอดขายตามรอบที่ใช้งาน</small><strong>${amount(gross)}</strong><span>${eligible.length} รอบ · ไม่รวมรายการยกเลิก</span></article><article class="mpa-card mpa-stat"><small>ยอดสุทธิที่จ่ายแล้ว</small><strong>${summaryAmount(paid)}</strong><span>${paid.length ? `${paid.length} รอบที่ยืนยันการจ่าย` : 'ยังไม่มีรอบที่จ่ายแล้ว'}</span></article><article class="mpa-card mpa-stat"><small>ยอดสุทธิรอจ่าย</small><strong>${summaryAmount(pending)}</strong><span>${pending.length ? `${pending.length} รอบที่กำลังรอการจ่าย` : 'ไม่มีรายการรอจ่าย'}</span></article><article class="mpa-card mpa-stat"><small>GP แพลตฟอร์มตามรอบ</small><strong>${amount(gp)}</strong><span>ใช้ยอดที่ Admin บันทึกใน settlement</span></article></div><section class="mpa-card mpa-finance-ledger"><div class="mpa-finance-ledger__head"><div><span class="mpa-kicker">ประวัติ settlement</span><h2>รอบสรุปยอด</h2></div><span class="mpa-muted">${normalized.length} รายการ</span></div><div class="mpa-finance-list">${normalized.map(row => `<article class="mpa-finance-row"><div class="mpa-finance-row__head"><div><strong>${h(row.id || 'SETTLEMENT')}</strong><span>สร้างเมื่อ ${h(dateLabel(row.created_at))}</span></div><span class="mpa-finance-status ${settlementTone(row.status)}">${h(settlementStatus(row.status))}</span></div><dl><div><dt>ช่วงคำนวณ</dt><dd>${h(dateOnly(row.period_start))} — ${h(dateOnly(row.period_end))}</dd></div><div><dt>ยอดขายรวม</dt><dd>${h(amount(row.gross_amount))}</dd></div><div><dt>GP แพลตฟอร์ม${row.gp_percent !== null && row.gp_percent !== undefined ? ` (${h(row.gp_percent)}%)` : ''}</dt><dd>${h(amount(row.gp_amount))}</dd></div><div><dt>ยอดรับสุทธิ</dt><dd class="mpa-finance-row__net">${h(amount(row.net_amount))}</dd></div><div><dt>${String(row.status || '').toLowerCase() === 'paid' ? 'จ่ายเมื่อ' : 'ครบกำหนด'}</dt><dd>${h(String(row.status || '').toLowerCase() === 'paid' ? dateLabel(row.paid_at) : dateOnly(row.due_date))}</dd></div></dl>${row.payment_reference || row.payment_note || row.proof_image_url ? `<footer>${row.payment_reference ? `<span>อ้างอิง: ${h(row.payment_reference)}</span>` : ''}${row.payment_note ? `<span>${h(row.payment_note)}</span>` : ''}${row.proof_image_url ? `<a href="${h(row.proof_image_url)}" target="_blank" rel="noopener">ดูหลักฐานการจ่าย</a>` : ''}</footer>` : ''}</article>`).join('')}</div></section>${renderPayout()}`;
     };
-    try { render(await scope.request(path, { private: true, cacheTtlMs: 10_000, cacheKey: `merchant-finance:${ctx.store.id}` })); } catch (err) { if (err.code !== M.network.STALE_RESPONSE) $('#finance').innerHTML = M.ui.error('โหลดข้อมูลการเงินไม่สำเร็จ', err.message); return; }
+    const loadSalesAnalytics = async forceFresh => { try { renderSalesAnalytics(await scope.request(salesPath, { private: true, cacheTtlMs: 30_000, forceFresh, cacheKey: `merchant-sales-analytics:${ctx.store.id}` })); } catch (err) { if (err.code !== M.network.STALE_RESPONSE) $('#salesAnalytics').innerHTML = M.ui.error('โหลดสถิติยอดขายไม่สำเร็จ', err.message); } };
+    try { const [settlements] = await Promise.all([scope.request(path, { private: true, cacheTtlMs: 10_000, cacheKey: `merchant-finance:${ctx.store.id}` }), loadSalesAnalytics(false)]); render(settlements); } catch (err) { if (err.code !== M.network.STALE_RESPONSE) $('#finance').innerHTML = M.ui.error('โหลดข้อมูลการเงินไม่สำเร็จ', err.message); return; }
     const stop = M.network.startBackgroundSync({ key: `merchant-finance:${ctx.store.id}`, intervalMs: 20_000, task: async () => { const rows = await M.request(path, { private: true, forceFresh: true, cacheKey: `merchant-finance:${ctx.store.id}` }); const signature = JSON.stringify((rows || []).map(row => [row.id, row.status, row.net_amount, row.gp_amount, row.paid_at, row.updated_at])); return { changed: signature !== lastSignature, data: rows }; }, onData: render, onError: error => M.ui.setNotice(`อัปเดตข้อมูลการเงินไม่สำเร็จ: ${error.message}`, 'error') });
-    addEventListener('pagehide', stop, { once: true });
+    const stopSales = M.network.startBackgroundSync({ key: `merchant-sales-analytics:${ctx.store.id}`, intervalMs: 60_000, task: async () => { const rows = await M.request(salesPath, { private: true, forceFresh: true, cacheKey: `merchant-sales-analytics:${ctx.store.id}` }); const signature = JSON.stringify((rows || []).map(row => [row.id, row.status, row.payable, row.total, row.completed_at])); return { changed: signature !== lastSalesSignature, data: rows }; }, onData: renderSalesAnalytics, onError: error => M.ui.setNotice(`อัปเดตสถิติยอดขายไม่สำเร็จ: ${error.message}`, 'error') });
+    addEventListener('pagehide', () => { stop(); stopSales(); }, { once: true });
   }
 
   async function settings() {

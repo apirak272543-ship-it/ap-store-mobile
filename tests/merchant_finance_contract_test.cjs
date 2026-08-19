@@ -16,8 +16,8 @@ assert.match(app, /ยังไม่มีรอบสรุปยอดสำ�
 assert.doesNotMatch(app, /JSON\.stringify\(rows, null, 2\)/, 'Raw settlement JSON may not be rendered');
 assert.match(app, /merchant-finance:\$\{ctx\.store\.id\}/, 'Finance must use a store-scoped cache key');
 assert.match(app, /startBackgroundSync\(\{ key: `merchant-finance:/, 'Finance must use the established bounded refresh mechanism');
-assert.match(app, /addEventListener\('pagehide', stop/, 'Finance must stop refresh work on pagehide');
+assert.match(app, /addEventListener\('pagehide', \(\) => \{ stop\(\); stopSales\(\); \}/, 'Finance must stop settlement and sales refresh work on pagehide');
 assert.match(app, /maskedAccount/, 'Payout account numbers must be masked in the UI');
-assert.match(shell, /merchant-app\.js\?v=merchant-ui-v3/, 'Finance shell must request the released finance script version');
+assert.match(shell, /merchant-app\.js\?v=merchant-sales-v1/, 'Finance shell must request the released sales analytics script version');
 assert.match(css, /mpa-finance-summary/, 'Finance must have responsive presentation styles');
 console.log('merchant finance contract: passed');
