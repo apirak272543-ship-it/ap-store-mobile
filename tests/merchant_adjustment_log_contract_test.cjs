@@ -1,0 +1,10 @@
+const fs = require('fs');
+const assert = require('assert');
+const html = fs.readFileSync('merchant/orders.html', 'utf8');
+const source = fs.readFileSync('merchant/merchant-adjustment-log.js', 'utf8');
+assert.match(html, /merchant-adjustment-log\.js/, 'Merchant Orders ต้องโหลด adjustment log');
+assert.match(source, /merchant_list_order_adjustment_log/, 'UI ต้องเรียก read-only log RPC');
+assert.match(source, /อ่านได้อย่างเดียว/, 'UI ต้องอธิบายว่าไม่แก้ไขข้อมูล');
+assert.match(source, /escapeHtml/, 'UI ต้อง escape audit detail ก่อนแสดงผล');
+assert.match(source, /ดูประวัติการปรับ/, 'UI ต้องมีจุดเปิด Adjustment Log');
+console.log('merchant adjustment log contract: PASS');
