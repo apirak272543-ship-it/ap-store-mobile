@@ -138,7 +138,7 @@
     if (!ctx) return;
     const draftMedia = { image_url: '' };
     let categoryRows = [];
-    window.APServiceLocalMenuOCR?.mount({ host: $('#menuImageImport'), getCategories: () => categoryRows, onCommit: async rows => {
+    const localOcrImport = window.APServiceLocalMenuOCR?.mount({ host: $('#menuImageImport'), getCategories: () => categoryRows, onCommit: async rows => {
       const result = await M.request('rpc/import_menu_drafts', { method: 'POST', private: true, body: JSON.stringify({ p_store_id: ctx.store.id, p_rows: rows, p_source: 'local_ocr' }) });
       await load();
       const summary = Array.isArray(result) ? result[0] : result;
@@ -180,7 +180,7 @@
           M.request(`menu_items?select=id,name,emoji,description,price,stock,available,promo,image_url,category_id,archived_at,archived_reason&store_id=eq.${encodeURIComponent(ctx.store.id)}&archived_at=not.is.null&order=archived_at.desc`, { private: true }),
           M.request(`menu_categories?select=id,name,icon,sort_order,active&store_id=eq.${encodeURIComponent(ctx.store.id)}&order=sort_order.asc`, { private: true }).catch(() => []),
         ]);
-        categoryRows = categories || []; $('#category').innerHTML = categoryOptions(''); render(rows || [], archivedRows || []);
+        categoryRows = categories || []; $('#category').innerHTML = categoryOptions(''); localOcrImport?.refresh?.(); render(rows || [], archivedRows || []);
       } catch (err) { $('#list').innerHTML = M.ui.error('โหลดเมนูไม่สำเร็จ', err.message); }
     };
     $('#add').onsubmit = async event => { event.preventDefault(); try { await M.request('menu_items', { method: 'POST', private: true, headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ id: newEntityId('menu'), store_id: ctx.store.id, name: $('#name').value.trim(), emoji: '🍜', description: $('#description').value.trim(), price: Number($('#price').value), stock: Number($('#stock').value), available: true, promo: $('#promo').checked, category_id: $('#category').value || null, image_url: draftMedia.image_url || null }) }); M.ui.setNotice('เพิ่มเมนูแล้ว'); event.target.reset(); draftMedia.image_url = ''; $('#preview-menu-image').hidden = true; $('#menuMediaStatus').textContent = 'ยังไม่มีการเลือกรูปภาพ'; load(); } catch (err) { M.ui.setNotice(err.message, 'error'); } };
