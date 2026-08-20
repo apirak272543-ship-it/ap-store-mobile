@@ -37,6 +37,7 @@
     }
     const config = await readCentralConfig(access.user.id);
     mountCentralConfig(config);
+    void window.APServiceMerchantRecognition?.notify(access);
     return { ...access, store, control, config };
   }
 
@@ -304,8 +305,8 @@
   }
 
   async function settings() {
-    const ctx = await gate('settings', `<section class="mpa-card"><h1>ตั้งค่าร้านค้า</h1><p class="mpa-muted">การตั้งค่าเฉพาะร้าน ไม่กระทบกติกากลางของแพลตฟอร์ม</p><button class="mpa-button mpa-button-secondary" id="out">ออกจากระบบ</button></section>`);
-    if (ctx) $('#out').onclick = () => M.auth.signOut('login.html');
+    const ctx = await gate('settings', `<div id="merchant-recognition-host"></div><section class="mpa-card"><h1>ตั้งค่าร้านค้า</h1><p class="mpa-muted">การตั้งค่าเฉพาะร้าน ไม่กระทบกติกากลางของแพลตฟอร์ม</p><button class="mpa-button mpa-button-secondary" id="out">ออกจากระบบ</button></section>`);
+    if (ctx) { $('#out').onclick = () => M.auth.signOut('login.html'); void window.APServiceMerchantRecognition?.mount({ host: $('#merchant-recognition-host'), user: ctx.user }); }
   }
 
   ({ login, dashboard, orders, menu, store, finance, settings }[page] || login)();
