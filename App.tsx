@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, AppState, BackHandler, Modal, Pressable, SafeAreaView, StatusBar, StyleSheet, Switch, Text, View } from "react-native";
+import * as Location from "expo-location";
 import { WebView } from "react-native-webview";
 
 import { clearSession, countOpenStoreOrders, disablePushToken, registerPushToken, Session } from "./src/api";
@@ -76,6 +77,7 @@ const storeLogoutBridge = `
 
 export default function App() {
   const webRef = useRef<WebView>(null);
+  const locationPermissionPromptedRef = useRef(false);
   const [canGoBack, setCanGoBack] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -218,6 +220,19 @@ export default function App() {
 
   const pushStatus = pushToken ? "อุปกรณ์นี้พร้อมรับการแจ้งเตือน" : pushIssueRef.current ? "ต้องตรวจสอบสิทธิ์แจ้งเตือน" : "กำลังตรวจสอบการแจ้งเตือน";
 
+  const requestWebLocationPermission = async () => {
+    if (locationPermissionPromptedRef.current) return;
+    try {
+      if (!(await Location.hasServicesEnabledAsync())) return;
+      const current = await Location.getForegroundPermissionsAsync();
+      if (current.granted || !current.canAskAgain) return;
+      locationPermissionPromptedRef.current = true;
+      await Location.requestForegroundPermissionsAsync();
+    } catch {
+      // หน้าเว็บยังแสดงสถานะและปุ่มลองใหม่ของตนเอง หากระบบปฏิบัติการขอสิทธิ์ไม่ได้
+    }
+  };
+
   const handleMessage = (event: { nativeEvent: { data: string } }) => {
     try {
       const payload = JSON.parse(event.nativeEvent.data);
@@ -252,10 +267,11 @@ export default function App() {
         injectedJavaScript={sessionBridge}
         onMessage={handleMessage}
         onLoadStart={() => { setIsLoading(true); setLoadError(false); }}
-        onLoadEnd={() => setIsLoading(false)}
+        onLoadEnd={() => { setIsLoading(false); void requestWebLocationPermission(); }}
         onError={() => setLoadError(true)}
         onNavigationStateChange={(state) => setCanGoBack(state.canGoBack)}
         javaScriptEnabled
+        geolocationEnabled
         domStorageEnabled
         cacheEnabled
         thirdPartyCookiesEnabled
