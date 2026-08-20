@@ -79,10 +79,11 @@
   async function recognize(file, onProgress = () => {}) {
     if (!window.Tesseract?.createWorker) throw new Error('ชุด OCR ในเครื่องยังโหลดไม่พร้อม กรุณารีเฟรชแล้วลองใหม่');
     const compressed = await compressForOcr(file);
+    const assetRoot = new URL('../shared/ocr/', window.location.href).href;
     const worker = await window.Tesseract.createWorker('tha+eng', 1, {
-      workerPath: '../shared/ocr/worker.min.js',
-      langPath: '../shared/ocr/lang',
-      corePath: '../shared/ocr/core/tesseract-core-lstm.wasm.js',
+      workerPath: `${assetRoot}worker.min.js`,
+      langPath: `${assetRoot}lang`,
+      corePath: `${assetRoot}core/tesseract-core-lstm.wasm.js`,
       logger: event => {
         if (event?.status) onProgress(event.status, Number(event.progress || 0));
       },

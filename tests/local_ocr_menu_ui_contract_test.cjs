@@ -8,9 +8,10 @@ const app = fs.readFileSync(path.join(__dirname, '../merchant/merchant-app.js'),
 
 assert.match(html, /shared\/ocr\/tesseract\.min\.js/);
 assert.match(html, /local-menu-ocr\.js/);
-assert.match(ocr, /workerPath: '\.\.\/shared\/ocr\/worker\.min\.js'/);
-assert.match(ocr, /langPath: '\.\.\/shared\/ocr\/lang'/);
-assert.match(ocr, /corePath: '\.\.\/shared\/ocr\/core\/tesseract-core-lstm\.wasm\.js'/);
+assert.match(ocr, /new URL\('\.\.\/shared\/ocr\/', window\.location\.href\)/);
+assert.match(ocr, /workerPath: `\$\{assetRoot\}worker\.min\.js`/);
+assert.match(ocr, /langPath: `\$\{assetRoot\}lang`/);
+assert.match(ocr, /corePath: `\$\{assetRoot\}core\/tesseract-core-lstm\.wasm\.js`/);
 assert.doesNotMatch(ocr, /https:\/\//);
 assert.match(ocr, /MAX_BYTES = 1024 \* 1024/);
 assert.match(ocr, /parseMenuText/);
