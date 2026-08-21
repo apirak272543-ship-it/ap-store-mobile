@@ -1,0 +1,337 @@
+:root {
+  --merchant-ui-ink: #1d392d;
+  --merchant-ui-ink-soft: #426657;
+  --merchant-ui-muted: #6b8175;
+  --merchant-ui-brand: #269867;
+  --merchant-ui-deep: #14633f;
+  --merchant-ui-soft: #eaf9f1;
+  --merchant-ui-line: #d8ece1;
+  --merchant-ui-paper: rgba(255, 255, 255, .96);
+  --merchant-ui-canvas: #f7fcf9;
+  --merchant-ui-shadow: 0 12px 30px rgba(25, 104, 64, .08);
+  --merchant-ui-shadow-hover: 0 18px 40px rgba(25, 104, 64, .14);
+}
+
+body {
+  min-width: 320px;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(155, 230, 191, .32), transparent 27rem),
+    radial-gradient(circle at 100% 18%, rgba(255, 223, 153, .20), transparent 25rem),
+    var(--merchant-ui-canvas);
+  color: var(--merchant-ui-ink);
+}
+
+.mpa-topbar {
+  min-height: 70px;
+  border-color: rgba(216, 236, 225, .9);
+  background: rgba(255, 255, 255, .92);
+  box-shadow: 0 7px 22px rgba(24, 104, 65, .07);
+  backdrop-filter: blur(18px);
+}
+
+.mpa-brand {
+  border-radius: 16px;
+  color: var(--merchant-ui-deep);
+  background: linear-gradient(145deg, #f6fffa, #e7f8ee);
+}
+
+.mpa-nav a {
+  min-height: 42px;
+  border-radius: 14px;
+  font-weight: 850;
+  transition: transform .18s ease, background .18s ease, color .18s ease;
+}
+
+.mpa-nav a:hover {
+  color: var(--merchant-ui-deep);
+  background: var(--merchant-ui-soft);
+  transform: translateY(-1px);
+}
+
+.mpa-nav a.active {
+  color: var(--merchant-ui-deep);
+  background: #e5f8ee;
+  box-shadow: inset 0 0 0 1px #bde6cf;
+}
+
+.mpa-shell {
+  width: min(100%, 1120px);
+  padding: 24px 18px 72px;
+}
+
+.mpa-page-head {
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid #dceee4;
+}
+
+.mpa-page-head::after {
+  content: "";
+  display: block;
+  width: 42px;
+  height: 4px;
+  margin-top: 12px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--merchant-ui-brand), #a6ddba);
+}
+
+.mpa-page-head h1,
+.mpa-page-head h2 {
+  color: var(--merchant-ui-deep);
+  font-size: clamp(1.5rem, 4vw, 2.1rem);
+  font-weight: 950;
+  letter-spacing: -.045em;
+}
+
+.mpa-page-head p,
+.mpa-muted {
+  color: var(--merchant-ui-muted);
+  line-height: 1.6;
+}
+
+.mpa-card,
+.mpa-table-wrap,
+.merchant-order-card,
+.merchant-menu-card,
+.merchant-finance-section,
+.merchant-store-section,
+.merchant-summary-card,
+.merchant-finance-card {
+  border: 1px solid var(--merchant-ui-line);
+  border-radius: 22px;
+  background: var(--merchant-ui-paper);
+  box-shadow: var(--merchant-ui-shadow);
+}
+
+.mpa-card,
+.merchant-order-card,
+.merchant-menu-card,
+.merchant-finance-section,
+.merchant-store-section,
+.merchant-summary-card,
+.merchant-finance-card {
+  padding: 19px;
+}
+
+.mpa-card:hover,
+.merchant-order-card:hover,
+.merchant-menu-card:hover,
+.merchant-summary-card:hover,
+.merchant-finance-card:hover {
+  border-color: #bfe3ce;
+  box-shadow: var(--merchant-ui-shadow-hover);
+}
+
+.mpa-grid {
+  gap: 15px;
+}
+
+.mpa-grid.stats {
+  gap: 14px;
+}
+
+.mpa-grid.stats .mpa-card,
+.merchant-summary-card,
+.merchant-finance-card {
+  min-height: 128px;
+  overflow: hidden;
+  background: linear-gradient(145deg, #fff, #f3fcf7);
+}
+
+.mpa-card h2,
+.mpa-card h3,
+.merchant-order-card h2,
+.merchant-order-card h3,
+.merchant-menu-card h2,
+.merchant-menu-card h3 {
+  color: var(--merchant-ui-deep);
+  letter-spacing: -.025em;
+}
+
+.mpa-card strong,
+.mpa-card b,
+.merchant-order-card strong,
+.merchant-menu-card strong,
+.merchant-finance-card strong {
+  color: #124f35;
+}
+
+.mpa-button {
+  min-height: 45px;
+  border: 1px solid var(--merchant-ui-brand);
+  border-radius: 14px;
+  padding: 10px 15px;
+  background: linear-gradient(135deg, var(--merchant-ui-brand), #55bd86);
+  font-weight: 900;
+  box-shadow: 0 8px 18px rgba(38, 152, 103, .17);
+  transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
+}
+
+.mpa-button:hover {
+  filter: saturate(1.08);
+  box-shadow: 0 12px 24px rgba(38, 152, 103, .24);
+  transform: translateY(-1px);
+}
+
+.mpa-button:active {
+  transform: scale(.97);
+}
+
+.mpa-button-secondary {
+  border-color: #cce7d8;
+  background: #f7fdf9;
+  color: var(--merchant-ui-deep);
+  box-shadow: none;
+}
+
+.mpa-button-secondary:hover {
+  background: #e9f9f0;
+  box-shadow: none;
+}
+
+.mpa-button-danger {
+  background: linear-gradient(135deg, #d95847, #e77b54);
+  border-color: #d95847;
+}
+
+.mpa-field {
+  gap: 7px;
+  margin-bottom: 15px;
+}
+
+.mpa-field label {
+  color: var(--merchant-ui-ink-soft);
+  font-size: .75rem;
+  font-weight: 850;
+}
+
+.mpa-field input,
+.mpa-field select,
+.mpa-field textarea {
+  min-height: 48px;
+  border: 1px solid #cfe5d8;
+  border-radius: 14px;
+  background: #fdfffe;
+  color: var(--merchant-ui-ink);
+  padding: 12px 13px;
+  font: inherit;
+  transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+
+.mpa-field input:focus,
+.mpa-field select:focus,
+.mpa-field textarea:focus {
+  outline: 0;
+  border-color: var(--merchant-ui-brand);
+  box-shadow: 0 0 0 4px rgba(38, 152, 103, .13);
+  transform: translateY(-1px);
+}
+
+.mpa-table-wrap {
+  overflow: auto;
+  padding: 0;
+}
+
+.mpa-table th {
+  background: #ebf9f1;
+  color: var(--merchant-ui-deep);
+  font-weight: 900;
+}
+
+.mpa-table td,
+.mpa-table th {
+  border-color: #e2f0e7;
+  padding: 13px 14px;
+}
+
+.mpa-table tbody tr:hover {
+  background: #f4fbf7;
+}
+
+.mpa-badge,
+.mpa-filter-button,
+.merchant-filter-button {
+  border: 1px solid #cde6d7;
+  border-radius: 999px;
+  background: #f7fdf9;
+  color: var(--merchant-ui-deep);
+  font-weight: 900;
+}
+
+.mpa-filter-button.active,
+.merchant-filter-button.active {
+  border-color: #a9dac0;
+  background: #e7f8ef;
+  color: var(--merchant-ui-deep);
+}
+
+.mpa-state {
+  min-height: 170px;
+  border: 1px dashed #bfe3ce;
+  border-radius: 20px;
+  background: linear-gradient(145deg, #fff, #f3fcf7);
+}
+
+.mpa-modal-backdrop {
+  background: rgba(19, 72, 47, .32);
+  backdrop-filter: blur(5px);
+}
+
+.mpa-modal {
+  border-color: #d4e9dd;
+  border-radius: 25px;
+  box-shadow: 0 28px 62px rgba(17, 71, 45, .22);
+}
+
+@media (max-width: 760px) {
+  .mpa-topbar {
+    min-height: 64px;
+    padding: 9px 13px;
+  }
+
+  .mpa-shell {
+    padding: 17px 13px 86px;
+  }
+
+  .mpa-card,
+  .merchant-order-card,
+  .merchant-menu-card,
+  .merchant-finance-section,
+  .merchant-store-section,
+  .merchant-summary-card,
+  .merchant-finance-card {
+    padding: 15px;
+    border-radius: 20px;
+  }
+
+  .mpa-grid.stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mpa-table-wrap {
+    border-radius: 17px;
+  }
+
+  .mpa-table th,
+  .mpa-table td {
+    min-width: 112px;
+    padding: 11px;
+  }
+}
+
+@media (max-width: 390px) {
+  .mpa-shell {
+    padding-left: 11px;
+    padding-right: 11px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mpa-nav a,
+  .mpa-card,
+  .merchant-order-card,
+  .merchant-menu-card,
+  .mpa-button {
+    transition: none !important;
+  }
+}
